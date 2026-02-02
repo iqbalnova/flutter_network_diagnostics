@@ -1,8 +1,5 @@
+// lib/flutter_network_diagnostics.dart
 
-import 'flutter_network_diagnostics_platform_interface.dart';
-
-class FlutterNetworkDiagnostics {
-  Future<String?> getPlatformVersion() {
-    return FlutterNetworkDiagnosticsPlatform.instance.getPlatformVersion();
-  }
-}
+export 'src/models/network_diagnostics_data.dart';
+export 'src/services/flutter_network_diagnostics_service.dart';
+export 'src/platform/flutter_network_diagnostics_platform_interface.dart';
