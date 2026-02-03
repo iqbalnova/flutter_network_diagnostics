@@ -4,12 +4,31 @@ import SystemConfiguration
 import SystemConfiguration.CaptiveNetwork
 import Foundation
 
-public class FlutterNetworkDiagnosticsPlugin: NSObject, FlutterPlugin {
+public class FlutterNetworkDiagnosticsPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     
     public static func register(with registrar: FlutterPluginRegistrar) {
-        let channel = FlutterMethodChannel(name: "flutter_network_diagnostics", binaryMessenger: registrar.messenger())
+        let methodChannel = FlutterMethodChannel(
+            name: "flutter_network_diagnostics",
+            binaryMessenger: registrar.messenger()
+        )
+        
+        // Event channels for signal monitoring (unsupported on iOS)
+        let wifiEventChannel = FlutterEventChannel(
+            name: "flutter_network_diagnostics/wifi_signal_stream",
+            binaryMessenger: registrar.messenger()
+        )
+        
+        let mobileEventChannel = FlutterEventChannel(
+            name: "flutter_network_diagnostics/mobile_signal_stream",
+            binaryMessenger: registrar.messenger()
+        )
+        
         let instance = FlutterNetworkDiagnosticsPlugin()
-        registrar.addMethodCallDelegate(instance, channel: channel)
+        registrar.addMethodCallDelegate(instance, channel: methodChannel)
+        
+        // Set stream handlers for signal monitoring
+        wifiEventChannel.setStreamHandler(instance)
+        mobileEventChannel.setStreamHandler(instance)
     }
     
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -44,9 +63,41 @@ public class FlutterNetworkDiagnosticsPlugin: NSObject, FlutterPlugin {
             result(getWifiIPv6Addresses())
         case "getBroadcastAddress":
             result(getBroadcastAddress())
+            
+        // Signal monitoring methods (unsupported on iOS)
+        case "getWifiSignalInfo":
+            result(FlutterError(
+                code: "UNSUPPORTED",
+                message: "Wi-Fi signal monitoring is not supported on iOS",
+                details: "iOS does not provide APIs for accessing RSSI and detailed Wi-Fi signal information"
+            ))
+        case "getMobileSignalInfo":
+            result(FlutterError(
+                code: "UNSUPPORTED",
+                message: "Mobile signal monitoring is not supported on iOS",
+                details: "iOS does not provide public APIs for accessing cellular signal strength"
+            ))
+            
         default:
             result(FlutterMethodNotImplemented)
         }
+    }
+    
+    // MARK: - FlutterStreamHandler (for signal monitoring)
+    
+    public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+        // Immediately send error for unsupported signal monitoring on iOS
+        events(FlutterError(
+            code: "UNSUPPORTED",
+            message: "Real-time signal monitoring is not supported on iOS",
+            details: "iOS does not provide APIs for continuous Wi-Fi or cellular signal monitoring"
+        ))
+        return nil
+    }
+    
+    public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+        // Nothing to cancel on iOS
+        return nil
     }
     
     // MARK: - Connection Methods

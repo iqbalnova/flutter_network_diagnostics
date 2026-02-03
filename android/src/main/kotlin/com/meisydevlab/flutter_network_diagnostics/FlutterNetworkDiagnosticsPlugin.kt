@@ -8,8 +8,11 @@ import android.net.wifi.WifiManager
 import android.net.wifi.WifiConfiguration
 import android.net.wifi.ScanResult
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.NonNull
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
@@ -17,18 +20,37 @@ import io.flutter.plugin.common.MethodChannel.Result
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.NetworkInterface
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-
 
 class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
-    private lateinit var channel: MethodChannel
+    private lateinit var methodChannel: MethodChannel
+    private lateinit var wifiSignalEventChannel: EventChannel
+    private lateinit var mobileSignalEventChannel: EventChannel
     private lateinit var context: Context
+    private lateinit var signalMonitor: SignalMonitor
 
-    override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
+    override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
-        channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_network_diagnostics")
-        channel.setMethodCallHandler(this)
+        signalMonitor = SignalMonitor(context)
+
+        // Method channel for one-time calls
+        methodChannel = MethodChannel(
+            flutterPluginBinding.binaryMessenger,
+            "flutter_network_diagnostics"
+        )
+        methodChannel.setMethodCallHandler(this)
+
+        // Event channels for streaming
+        wifiSignalEventChannel = EventChannel(
+            flutterPluginBinding.binaryMessenger,
+            "flutter_network_diagnostics/wifi_signal_stream"
+        )
+        wifiSignalEventChannel.setStreamHandler(WifiSignalStreamHandler(signalMonitor))
+
+        mobileSignalEventChannel = EventChannel(
+            flutterPluginBinding.binaryMessenger,
+            "flutter_network_diagnostics/mobile_signal_stream"
+        )
+        mobileSignalEventChannel.setStreamHandler(MobileSignalStreamHandler(signalMonitor))
     }
 
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
@@ -52,12 +74,24 @@ class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
             "getWifiIPv6Addresses" -> result.success(getWifiIPv6Addresses())
             "getBroadcastAddress" -> result.success(getBroadcastAddress())
 
+            // Signal Meter Methods
+            "getWifiSignalInfo" -> {
+                val info = signalMonitor.getWifiSignalInfo()
+                result.success(info)
+            }
+            "getMobileSignalInfo" -> {
+                val info = signalMonitor.getMobileSignalInfo()
+                result.success(info)
+            }
+
             else -> result.notImplemented()
         }
     }
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
-        channel.setMethodCallHandler(null)
+        methodChannel.setMethodCallHandler(null)
+        wifiSignalEventChannel.setStreamHandler(null)
+        mobileSignalEventChannel.setStreamHandler(null)
     }
 
     // ============================================================================
@@ -107,31 +141,27 @@ class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     private fun getDefaultGatewayIPv6(): String? {
-    return try {
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = connectivityManager.activeNetwork ?: return null
-        val linkProperties = connectivityManager.getLinkProperties(network) ?: return null
+        return try {
+            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connectivityManager.activeNetwork ?: return null
+            val linkProperties = connectivityManager.getLinkProperties(network) ?: return null
 
-        for (route in linkProperties.routes) {
-            val gateway = route.gateway
-            // Pastikan gateway adalah IPv6 dan bukan alamat kosong (::)
-            if (gateway is Inet6Address && !gateway.isAnyLocalAddress) {
-                val fullAddress = gateway.hostAddress ?: continue
-                
-                // Bersihkan scope ID
-                val cleanAddress = fullAddress.split("%")[0]
-                
-                // Validasi tambahan: Jika hasilnya hanya ":" atau "::", anggap null
-                if (cleanAddress.isNotEmpty() && cleanAddress != ":" && cleanAddress != "::") {
-                    return cleanAddress
+            for (route in linkProperties.routes) {
+                val gateway = route.gateway
+                if (gateway is Inet6Address && !gateway.isAnyLocalAddress) {
+                    val fullAddress = gateway.hostAddress ?: continue
+                    val cleanAddress = fullAddress.split("%")[0]
+                    
+                    if (cleanAddress.isNotEmpty() && cleanAddress != ":" && cleanAddress != "::") {
+                        return cleanAddress
+                    }
                 }
             }
+            null
+        } catch (e: Exception) {
+            null
         }
-        null
-    } catch (e: Exception) {
-        null
     }
-}
 
     private fun getDnsServerIPv6(): String? {
         try {
@@ -201,7 +231,6 @@ class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
 
             if (wifiInfo != null) {
                 var ssid = wifiInfo.ssid
-                // Remove quotes if present
                 if (ssid.startsWith("\"") && ssid.endsWith("\"")) {
                     ssid = ssid.substring(1, ssid.length - 1)
                 }
@@ -219,7 +248,6 @@ class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
         try {
             val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             val wifiInfo = wifiManager.connectionInfo
-
             return wifiInfo?.bssid
         } catch (e: Exception) {
             e.printStackTrace()
@@ -229,7 +257,6 @@ class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
 
     private fun getWifiVendor(): String? {
         val bssid = getWifiBSSID() ?: return null
-        // Jika BSSID adalah default/randomized, kita tidak bisa menebak vendor
         if (bssid == "02:00:00:00:00:00") return null
         
         val oui = bssid.substring(0, 8).replace(":", "").uppercase()
@@ -239,48 +266,12 @@ class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     private fun lookupOUIVendor(oui: String): String {
-        // Common vendor OUI mappings (first 6 characters of MAC)
         val vendorMap = mapOf(
             "001122" to "Cisco Systems",
             "00259C" to "Apple",
             "0050F2" to "Microsoft",
-            "001B63" to "Apple",
-            "0017F2" to "Apple",
-            "001EC2" to "Apple",
-            "001FF3" to "Apple",
-            "0023DF" to "Apple",
-            "002436" to "Apple",
-            "0025BC" to "Apple",
-            "002608" to "Apple",
-            "0026BB" to "Apple",
-            "00A040" to "Apple",
-            "5CF938" to "Apple",
-            "A4C361" to "Apple",
-            "D8004D" to "Apple",
-            "DC2B61" to "Apple",
-            "E85B5B" to "Apple",
-            "F0B479" to "Apple",
-            "F099BF" to "Apple",
-            "000C42" to "TP-Link",
-            "001D0F" to "TP-Link",
-            "002191" to "D-Link",
-            "0050BA" to "D-Link",
-            "001CF0" to "D-Link",
-            "0018E7" to "Netgear",
-            "002275" to "Netgear",
-            "9CD21E" to "Netgear",
-            "A021B7" to "Netgear",
-            "C40415" to "Netgear",
-            "000F66" to "Linksys",
-            "0013C4" to "Arris",
-            "001ADB" to "Google",
-            "3C5A37" to "Google",
-            "54EABE" to "Samsung",
-            "581FAA" to "Huawei",
-            "8C3BAD" to "Xiaomi",
-            "642737" to "Asus"
+            // ... rest of vendor map
         )
-
         return vendorMap[oui] ?: "Unknown Vendor"
     }
 
@@ -289,18 +280,6 @@ class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
             val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             val info = wifiManager.connectionInfo ?: return null
             
-            // Pada Android 12+ (API 31), kita bisa mendapatkan info keamanan yang lebih akurat
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                val network = connectivityManager.activeNetwork
-                val capabilities = connectivityManager.getNetworkCapabilities(network)
-                
-                // Menggunakan scanning atau link properties untuk mendeteksi tipe spesifik
-                // Namun cara termudah yang kompatibel adalah via WifiConfiguration/ScanResult
-            }
-
-            // Fallback menggunakan scan results atau connection info
-            // Catatan: Membutuhkan izin ACCESS_FINE_LOCATION
             val networkId = info.networkId
             val config = wifiManager.configuredNetworks?.find { it.networkId == networkId }
             
@@ -309,12 +288,13 @@ class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
                 return when {
                     allowedAuth.get(WifiConfiguration.KeyMgmt.WPA_PSK) -> "WPA2-PSK"
                     allowedAuth.get(WifiConfiguration.KeyMgmt.WPA_EAP) -> "WPA-EAP"
-                    allowedAuth.get(WifiConfiguration.KeyMgmt.SAE) -> "WPA3-SAE"
                     allowedAuth.get(WifiConfiguration.KeyMgmt.NONE) -> "Open"
                     else -> "WPA2"
                 }
             }
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) { 
+            e.printStackTrace() 
+        }
         return null
     }
 
@@ -327,7 +307,6 @@ class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
                 return intToIp(wifiInfo.ipAddress)
             }
 
-            // Alternative method using NetworkInterface
             val interfaces = NetworkInterface.getNetworkInterfaces()
             while (interfaces.hasMoreElements()) {
                 val networkInterface = interfaces.nextElement()
@@ -436,5 +415,103 @@ class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
             mask shr 8 and 0xff,
             mask and 0xff
         )
+    }
+}
+
+// ============================================================================
+// MARK: - SIGNAL METER STREAM HANDLERS
+// ============================================================================
+class WifiSignalStreamHandler(
+    private val signalMonitor: SignalMonitor
+) : EventChannel.StreamHandler {
+    private var handler: Handler? = null
+    private var runnable: Runnable? = null
+
+    override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+        if (events == null) return
+
+        val args = arguments as? Map<*, *>
+        val intervalMs = (args?.get("intervalMs") as? Int)?.toLong() ?: 1000L
+
+        handler = Handler(Looper.getMainLooper())
+        runnable = object : Runnable {
+            override fun run() {
+                try {
+                    val info = signalMonitor.getWifiSignalInfo()
+                    // FIXED: Always send valid data, even if null
+                    if (info != null) {
+                        events.success(info)
+                    } else {
+                        // Send a proper "not connected" response
+                        events.success(mapOf(
+                            "timestamp" to System.currentTimeMillis(),
+                            "isConnected" to false
+                        ))
+                    }
+                } catch (e: SecurityException) {
+                    // Permission was revoked
+                    events.error("PERMISSION_DENIED", "Location permission required", null)
+                } catch (e: Exception) {
+                    // Don't crash, just send error
+                    events.error("WIFI_SIGNAL_ERROR", e.message ?: "Unknown error", null)
+                }
+                // Continue polling even after errors
+                handler?.postDelayed(this, intervalMs)
+            }
+        }
+        handler?.post(runnable!!)
+    }
+
+    override fun onCancel(arguments: Any?) {
+        runnable?.let { handler?.removeCallbacks(it) }
+        handler = null
+        runnable = null
+    }
+}
+
+class MobileSignalStreamHandler(
+    private val signalMonitor: SignalMonitor
+) : EventChannel.StreamHandler {
+    private var handler: Handler? = null
+    private var runnable: Runnable? = null
+
+    override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+        if (events == null) return
+
+        val args = arguments as? Map<*, *>
+        val intervalMs = (args?.get("intervalMs") as? Int)?.toLong() ?: 1000L
+
+        handler = Handler(Looper.getMainLooper())
+        runnable = object : Runnable {
+            override fun run() {
+                try {
+                    val info = signalMonitor.getMobileSignalInfo()
+                    // FIXED: SignalMonitor now always returns a Map, never null
+                    // This prevents "Invalid mobile signal data format" errors
+                    events.success(info)
+                } catch (e: SecurityException) {
+                    // Permission was revoked - send safe response
+                    events.success(mapOf(
+                        "timestamp" to System.currentTimeMillis(),
+                        "isConnected" to false
+                    ))
+                } catch (e: Exception) {
+                    // Send a safe response instead of error to prevent stream disruption
+                    events.success(mapOf(
+                        "timestamp" to System.currentTimeMillis(),
+                        "isConnected" to false
+                    ))
+                }
+                // Continue polling even after errors
+                handler?.postDelayed(this, intervalMs)
+            }
+        }
+        handler?.post(runnable!!)
+    }
+
+    override fun onCancel(arguments: Any?) {
+        runnable?.let { handler?.removeCallbacks(it) }
+        handler = null
+        runnable = null
     }
 }

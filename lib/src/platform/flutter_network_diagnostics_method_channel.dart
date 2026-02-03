@@ -2,6 +2,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_network_diagnostics/src/models/network_diagnostics_data.dart';
+import 'package:flutter_network_diagnostics/src/models/signal_info.dart';
 import 'package:http/http.dart' as http;
 
 import 'flutter_network_diagnostics_platform_interface.dart';
@@ -12,6 +13,15 @@ class MethodChannelFlutterNetworkDiagnostics
   /// The method channel used to interact with the native platform.
   @visibleForTesting
   final methodChannel = const MethodChannel('flutter_network_diagnostics');
+
+  // Event channels for real-time monitoring
+  static const EventChannel _wifiSignalEventChannel = EventChannel(
+    'flutter_network_diagnostics/wifi_signal_stream',
+  );
+
+  static const EventChannel _mobileSignalEventChannel = EventChannel(
+    'flutter_network_diagnostics/mobile_signal_stream',
+  );
 
   // ============================================================================
   // CONNECTION METHODS
@@ -298,5 +308,81 @@ class MethodChannelFlutterNetworkDiagnostics
       ipv6Addresses: results[15] as List<String>?,
       broadcastAddress: results[16] as String?,
     );
+  }
+
+  // ============================================================================
+  // MARK: - REAL-TIME SIGNAL MONITORING
+  // ============================================================================
+
+  @override
+  Stream<WifiSignalInfo> getWifiSignalStream({int intervalMs = 1000}) {
+    return _wifiSignalEventChannel
+        .receiveBroadcastStream({'intervalMs': intervalMs})
+        .map((event) {
+          if (event is Map) {
+            final data = Map<String, dynamic>.from(event);
+            return WifiSignalInfo.fromJson(data);
+          }
+          throw Exception('Invalid Wi-Fi signal data format');
+        })
+        .handleError((error) {
+          debugPrint('Wi-Fi signal stream error: $error');
+          if (error is PlatformException && error.code == 'UNSUPPORTED') {
+            throw UnsupportedError(
+              'Wi-Fi signal monitoring is not supported on this platform',
+            );
+          }
+          throw error;
+        });
+  }
+
+  @override
+  Stream<MobileSignalInfo> getMobileSignalStream({int intervalMs = 1000}) {
+    return _mobileSignalEventChannel
+        .receiveBroadcastStream({'intervalMs': intervalMs})
+        .map((event) {
+          if (event is Map) {
+            final data = Map<String, dynamic>.from(event);
+            return MobileSignalInfo.fromJson(data);
+          }
+          throw Exception('Invalid mobile signal data format');
+        })
+        .handleError((error) {
+          debugPrint('Mobile signal stream error: $error');
+          if (error is PlatformException && error.code == 'UNSUPPORTED') {
+            throw UnsupportedError(
+              'Mobile signal monitoring is not supported on this platform',
+            );
+          }
+          throw error;
+        });
+  }
+
+  @override
+  Future<WifiSignalInfo?> getWifiSignalInfo() async {
+    try {
+      final Map<dynamic, dynamic>? result = await methodChannel.invokeMethod(
+        'getWifiSignalInfo',
+      );
+      if (result == null) return null;
+      return WifiSignalInfo.fromJson(Map<String, dynamic>.from(result));
+    } on PlatformException catch (e) {
+      debugPrint('Failed to get Wi-Fi signal info: ${e.message}');
+      return null;
+    }
+  }
+
+  @override
+  Future<MobileSignalInfo?> getMobileSignalInfo() async {
+    try {
+      final Map<dynamic, dynamic>? result = await methodChannel.invokeMethod(
+        'getMobileSignalInfo',
+      );
+      if (result == null) return null;
+      return MobileSignalInfo.fromJson(Map<String, dynamic>.from(result));
+    } on PlatformException catch (e) {
+      debugPrint('Failed to get mobile signal info: ${e.message}');
+      return null;
+    }
   }
 }

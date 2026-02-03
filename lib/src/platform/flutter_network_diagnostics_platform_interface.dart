@@ -1,5 +1,6 @@
 // flutter_network_diagnostics_platform_interface.dart
 import 'package:flutter_network_diagnostics/src/models/network_diagnostics_data.dart';
+import 'package:flutter_network_diagnostics/src/models/signal_info.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_network_diagnostics_method_channel.dart';
@@ -132,5 +133,49 @@ abstract class FlutterNetworkDiagnosticsPlatform extends PlatformInterface {
   /// Get all network diagnostic information at once
   Future<NetworkDiagnosticsData> getAllNetworkInfo() {
     throw UnimplementedError('getAllNetworkInfo() has not been implemented.');
+  }
+
+  // ============================================================================
+  // MARK: -REAL-TIME SIGNAL MONITORING (Android-only)
+  // ============================================================================
+
+  /// Start monitoring Wi-Fi signal strength in real-time
+  ///
+  /// Returns a stream of [WifiSignalInfo] with the specified update interval.
+  /// On iOS, this returns a stream with a single error event indicating
+  /// the feature is not supported.
+  ///
+  /// [intervalMs] - Update interval in milliseconds (default: 1000ms)
+  ///
+  /// Required Android permissions:
+  /// - ACCESS_FINE_LOCATION (Android 8.1+)
+  /// - ACCESS_WIFI_STATE
+  Stream<WifiSignalInfo> getWifiSignalStream({int intervalMs = 1000}) {
+    throw UnimplementedError('getWifiSignalStream() has not been implemented.');
+  }
+
+  /// Start monitoring mobile (cellular) signal strength in real-time
+  ///
+  /// Returns a stream of [MobileSignalInfo] with the specified update interval.
+  /// On iOS, this returns a stream with a single error event indicating
+  /// the feature is not supported.
+  ///
+  /// [intervalMs] - Update interval in milliseconds (default: 1000ms)
+  ///
+  /// Required Android permissions:
+  /// - ACCESS_FINE_LOCATION (Android 8.1+)
+  /// - READ_PHONE_STATE
+  Stream<MobileSignalInfo> getMobileSignalStream({int intervalMs = 1000}) {
+    throw UnimplementedError(
+      'getMobileSignalStream() has not been implemented.',
+    );
+  }
+
+  Future<WifiSignalInfo?> getWifiSignalInfo() {
+    throw UnimplementedError('getWifiSignalInfo() has not been implemented.');
+  }
+
+  Future<MobileSignalInfo?> getMobileSignalInfo() {
+    throw UnimplementedError('getMobileSignalInfo() has not been implemented.');
   }
 }
