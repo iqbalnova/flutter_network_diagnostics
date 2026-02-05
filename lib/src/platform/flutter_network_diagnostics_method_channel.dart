@@ -23,6 +23,8 @@ class MethodChannelFlutterNetworkDiagnostics
     'flutter_network_diagnostics/mobile_signal_stream',
   );
 
+  // MARK: - WIFI INFORMATION
+
   // ============================================================================
   // CONNECTION METHODS
   // ============================================================================
@@ -311,7 +313,7 @@ class MethodChannelFlutterNetworkDiagnostics
   }
 
   // ============================================================================
-  // MARK: - REAL-TIME SIGNAL MONITORING
+  // MARK: - REALTIME SIGNAL METER
   // ============================================================================
 
   @override

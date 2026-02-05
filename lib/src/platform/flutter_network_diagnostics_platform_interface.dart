@@ -27,6 +27,8 @@ abstract class FlutterNetworkDiagnosticsPlatform extends PlatformInterface {
     _instance = instance;
   }
 
+  // MARK: - WIFI INFORMATION
+
   // ============================================================================
   // CONNECTION METHODS
   // ============================================================================
@@ -136,7 +138,7 @@ abstract class FlutterNetworkDiagnosticsPlatform extends PlatformInterface {
   }
 
   // ============================================================================
-  // MARK: -REAL-TIME SIGNAL MONITORING (Android-only)
+  // MARK: - REALTIME SIGNAL METER
   // ============================================================================
 
   /// Start monitoring Wi-Fi signal strength in real-time

@@ -276,27 +276,46 @@ class FlutterNetworkDiagnosticsPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     private fun getWifiSecurityType(): String? {
-        try {
-            val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            val info = wifiManager.connectionInfo ?: return null
-            
-            val networkId = info.networkId
-            val config = wifiManager.configuredNetworks?.find { it.networkId == networkId }
-            
-            if (config != null) {
-                val allowedAuth = config.allowedKeyManagement
-                return when {
-                    allowedAuth.get(WifiConfiguration.KeyMgmt.WPA_PSK) -> "WPA2-PSK"
-                    allowedAuth.get(WifiConfiguration.KeyMgmt.WPA_EAP) -> "WPA-EAP"
-                    allowedAuth.get(WifiConfiguration.KeyMgmt.NONE) -> "Open"
-                    else -> "WPA2"
-                }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = cm.activeNetwork ?: return null
+            val caps = cm.getNetworkCapabilities(network) ?: return null
+
+            val wifiInfo = caps.transportInfo as? WifiInfo ?: return null
+
+            return when (wifiInfo.currentSecurityType) {
+                WifiInfo.SECURITY_TYPE_OPEN -> "Open"
+                WifiInfo.SECURITY_TYPE_WEP -> "WEP"
+                WifiInfo.SECURITY_TYPE_PSK -> "WPA/WPA2-PSK"
+                WifiInfo.SECURITY_TYPE_EAP -> "Enterprise (EAP)"
+                WifiInfo.SECURITY_TYPE_SAE -> "WPA3-SAE"
+                WifiInfo.SECURITY_TYPE_OWE -> "WPA3-OWE"
+                WifiInfo.SECURITY_TYPE_WAPI_PSK -> "WAPI-PSK"
+                WifiInfo.SECURITY_TYPE_WAPI_CERT -> "WAPI-CERT"
+                else -> "Unknown"
             }
-        } catch (e: Exception) { 
-            e.printStackTrace() 
+        } else {
+            // Fallback for very old Android (pre-10)
+            return try {
+                val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                val info = wifiManager.connectionInfo ?: return null
+                val networkId = info.networkId
+                val config = wifiManager.configuredNetworks?.find { it.networkId == networkId }
+
+                config?.let {
+                    when {
+                        it.allowedKeyManagement.get(WifiConfiguration.KeyMgmt.WPA_PSK) -> "WPA/WPA2-PSK"
+                        it.allowedKeyManagement.get(WifiConfiguration.KeyMgmt.WPA_EAP) -> "Enterprise"
+                        it.allowedKeyManagement.get(WifiConfiguration.KeyMgmt.NONE) -> "Open"
+                        else -> "Secured"
+                    }
+                }
+            } catch (e: Exception) {
+                null
+            }
         }
-        return null
     }
+
 
     private fun getWifiIPv4Address(): String? {
         try {
