@@ -2,9 +2,15 @@ import Flutter
 import UIKit
 import SystemConfiguration
 import SystemConfiguration.CaptiveNetwork
+import NetworkExtension
+import CoreLocation
 import Foundation
 
-public class FlutterNetworkDiagnosticsPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
+public class FlutterNetworkDiagnosticsPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, CLLocationManagerDelegate {
+    
+    private var locationManager: CLLocationManager?
+    private var pendingSSIDCompletion: ((String?) -> Void)?
+    private var pendingBSSIDCompletion: ((String?) -> Void)?
     
     public static func register(with registrar: FlutterPluginRegistrar) {
         let methodChannel = FlutterMethodChannel(
@@ -31,6 +37,12 @@ public class FlutterNetworkDiagnosticsPlugin: NSObject, FlutterPlugin, FlutterSt
         mobileEventChannel.setStreamHandler(instance)
     }
     
+    public override init() {
+        super.init()
+        locationManager = CLLocationManager()
+        locationManager?.delegate = self
+    }
+    
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
         case "getDefaultGatewayIP":
@@ -48,9 +60,13 @@ public class FlutterNetworkDiagnosticsPlugin: NSObject, FlutterPlugin, FlutterSt
         case "isNetworkConnected":
             result(isNetworkConnected())
         case "getWifiSSID":
-            result(getWifiSSID())
+            getWifiSSID { ssid in
+                result(ssid)
+            }
         case "getWifiBSSID":
-            result(getWifiBSSID())
+            getWifiBSSID { bssid in
+                result(bssid)
+            }
         case "getWifiVendor":
             result(getWifiVendor())
         case "getWifiSecurityType":
@@ -100,6 +116,35 @@ public class FlutterNetworkDiagnosticsPlugin: NSObject, FlutterPlugin, FlutterSt
         return nil
     }
     
+    // MARK: - CLLocationManagerDelegate
+    
+    public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status: CLAuthorizationStatus
+        if #available(iOS 14.0, *) {
+            status = manager.authorizationStatus
+        } else {
+            status = CLLocationManager.authorizationStatus()
+        }
+        
+        // If authorized, retry pending WiFi info requests
+        if status == .authorizedWhenInUse || status == .authorizedAlways {
+            if let completion = pendingSSIDCompletion {
+                fetchSSIDDirect(completion: completion)
+                pendingSSIDCompletion = nil
+            }
+            if let completion = pendingBSSIDCompletion {
+                fetchBSSIDDirect(completion: completion)
+                pendingBSSIDCompletion = nil
+            }
+        } else if status == .denied || status == .restricted {
+            // Permission denied
+            pendingSSIDCompletion?(nil)
+            pendingBSSIDCompletion?(nil)
+            pendingSSIDCompletion = nil
+            pendingBSSIDCompletion = nil
+        }
+    }
+    
     // MARK: - Connection Methods
     
     private func getDefaultGatewayIP() -> String? {
@@ -142,7 +187,123 @@ public class FlutterNetworkDiagnosticsPlugin: NSObject, FlutterPlugin, FlutterSt
         return nil
     }
     
-    // MARK: - WiFi Methods
+    // MARK: - WiFi Methods with iOS 13+ Support
+    
+    private func getWifiSSID(completion: @escaping (String?) -> Void) {
+        // Check location permission first
+        let status: CLAuthorizationStatus
+        if #available(iOS 14.0, *) {
+            status = locationManager?.authorizationStatus ?? .notDetermined
+        } else {
+            status = CLLocationManager.authorizationStatus()
+        }
+        
+        switch status {
+        case .authorizedWhenInUse, .authorizedAlways:
+            // Permission granted, fetch directly
+            fetchSSIDDirect(completion: completion)
+            
+        case .notDetermined:
+            // Request permission
+            pendingSSIDCompletion = completion
+            locationManager?.requestWhenInUseAuthorization()
+            
+        case .denied, .restricted:
+            // Permission denied, try fallback but will likely return nil
+            fetchSSIDDirect(completion: completion)
+            
+        @unknown default:
+            completion(nil)
+        }
+    }
+    
+    private func fetchSSIDDirect(completion: @escaping (String?) -> Void) {
+        // Method 1: Try NEHotspotNetwork (iOS 14+)
+        if #available(iOS 14.0, *) {
+            NEHotspotNetwork.fetchCurrent { network in
+                if let ssid = network?.ssid {
+                    completion(ssid)
+                } else {
+                    // Fallback to CNCopyCurrentNetworkInfo
+                    completion(self.fetchSSIDLegacy())
+                }
+            }
+        } else {
+            // Method 2: Use CNCopyCurrentNetworkInfo (iOS 13+)
+            completion(fetchSSIDLegacy())
+        }
+    }
+    
+    private func fetchSSIDLegacy() -> String? {
+        if let interfaces = CNCopySupportedInterfaces() as? [String] {
+            for interface in interfaces {
+                if let info = CNCopyCurrentNetworkInfo(interface as CFString) as? [String: Any],
+                   let ssid = info[kCNNetworkInfoKeySSID as String] as? String {
+                    return ssid
+                }
+            }
+        }
+        return nil
+    }
+    
+    private func getWifiBSSID(completion: @escaping (String?) -> Void) {
+        // Check location permission first
+        let status: CLAuthorizationStatus
+        if #available(iOS 14.0, *) {
+            status = locationManager?.authorizationStatus ?? .notDetermined
+        } else {
+            status = CLLocationManager.authorizationStatus()
+        }
+        
+        switch status {
+        case .authorizedWhenInUse, .authorizedAlways:
+            // Permission granted, fetch directly
+            fetchBSSIDDirect(completion: completion)
+            
+        case .notDetermined:
+            // Request permission
+            pendingBSSIDCompletion = completion
+            locationManager?.requestWhenInUseAuthorization()
+            
+        case .denied, .restricted:
+            // Permission denied, try fallback but will likely return nil
+            fetchBSSIDDirect(completion: completion)
+            
+        @unknown default:
+            completion(nil)
+        }
+    }
+    
+    private func fetchBSSIDDirect(completion: @escaping (String?) -> Void) {
+        // Method 1: Try NEHotspotNetwork (iOS 14+)
+        if #available(iOS 14.0, *) {
+            NEHotspotNetwork.fetchCurrent { network in
+                if let bssid = network?.bssid {
+                    completion(bssid)
+                } else {
+                    // Fallback to CNCopyCurrentNetworkInfo
+                    completion(self.fetchBSSIDLegacy())
+                }
+            }
+        } else {
+            // Method 2: Use CNCopyCurrentNetworkInfo (iOS 13+)
+            completion(fetchBSSIDLegacy())
+        }
+    }
+    
+    private func fetchBSSIDLegacy() -> String? {
+        if let interfaces = CNCopySupportedInterfaces() as? [String] {
+            for interface in interfaces {
+                if let info = CNCopyCurrentNetworkInfo(interface as CFString) as? [String: Any],
+                   let bssid = info[kCNNetworkInfoKeyBSSID as String] as? String {
+                    return bssid
+                }
+            }
+        }
+        return nil
+    }
+    
+    // MARK: - WiFi Methods (continued)
     
     private func isNetworkConnected() -> Bool {
         var zeroAddress = sockaddr_in()
@@ -166,30 +327,6 @@ public class FlutterNetworkDiagnosticsPlugin: NSObject, FlutterPlugin, FlutterSt
         let needsConnection = flags.contains(.connectionRequired)
         
         return isReachable && !needsConnection
-    }
-    
-    private func getWifiSSID() -> String? {
-        if let interfaces = CNCopySupportedInterfaces() as? [String] {
-            for interface in interfaces {
-                if let info = CNCopyCurrentNetworkInfo(interface as CFString) as? [String: Any],
-                   let ssid = info[kCNNetworkInfoKeySSID as String] as? String {
-                    return ssid
-                }
-            }
-        }
-        return nil
-    }
-    
-    private func getWifiBSSID() -> String? {
-        if let interfaces = CNCopySupportedInterfaces() as? [String] {
-            for interface in interfaces {
-                if let info = CNCopyCurrentNetworkInfo(interface as CFString) as? [String: Any],
-                   let bssid = info[kCNNetworkInfoKeyBSSID as String] as? String {
-                    return bssid
-                }
-            }
-        }
-        return nil
     }
     
     private func getWifiVendor() -> String? {
