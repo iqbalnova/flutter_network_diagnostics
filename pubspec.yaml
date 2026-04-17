@@ -1,11 +1,11 @@
 name: flutter_network_diagnostics
 description: "A new Flutter plugin project."
-version: 0.0.1
+version: 0.0.2
 homepage:
 
 environment:
   sdk: ^3.10.4
-  flutter: '>=3.3.0'
+  flutter: ">=3.3.0"
 
 dependencies:
   flutter:

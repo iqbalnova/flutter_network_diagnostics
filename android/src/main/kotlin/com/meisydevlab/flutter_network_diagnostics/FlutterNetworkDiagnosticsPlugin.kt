@@ -468,10 +468,13 @@ class WifiSignalStreamHandler(
                         ))
                     }
                 } catch (e: SecurityException) {
-                    // Permission was revoked
                     events.error("PERMISSION_DENIED", "Location permission required", null)
+                } catch (e: Error) {  
+                    events.success(mapOf(
+                        "timestamp" to System.currentTimeMillis(),
+                        "isConnected" to false
+                    ))
                 } catch (e: Exception) {
-                    // Don't crash, just send error
                     events.error("WIFI_SIGNAL_ERROR", e.message ?: "Unknown error", null)
                 }
                 // Continue polling even after errors
@@ -509,13 +512,16 @@ class MobileSignalStreamHandler(
                     // This prevents "Invalid mobile signal data format" errors
                     events.success(info)
                 } catch (e: SecurityException) {
-                    // Permission was revoked - send safe response
+                    events.success(mapOf(
+                        "timestamp" to System.currentTimeMillis(),
+                        "isConnected" to false
+                    ))
+                } catch (e: Error) {  
                     events.success(mapOf(
                         "timestamp" to System.currentTimeMillis(),
                         "isConnected" to false
                     ))
                 } catch (e: Exception) {
-                    // Send a safe response instead of error to prevent stream disruption
                     events.success(mapOf(
                         "timestamp" to System.currentTimeMillis(),
                         "isConnected" to false

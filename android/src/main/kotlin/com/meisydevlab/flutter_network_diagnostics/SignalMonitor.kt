@@ -53,15 +53,24 @@ class SignalMonitor(private val context: Context) {
 
             // API 29+: Max link speed
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put("maxLinkSpeed", wifiInfo.maxSupportedTxLinkSpeedMbps)
+                try {
+                    put("maxLinkSpeed", wifiInfo.maxSupportedTxLinkSpeedMbps)
+                } catch (e: NoSuchMethodError) {
+                    put("maxLinkSpeed", null)
+                }
             }
 
             // API 31+: TX/RX speeds
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                put("txLinkSpeed", wifiInfo.txLinkSpeedMbps)
-                put("rxLinkSpeed", wifiInfo.rxLinkSpeedMbps)
+                try {
+                    put("txLinkSpeed", wifiInfo.txLinkSpeedMbps)
+                    put("rxLinkSpeed", wifiInfo.rxLinkSpeedMbps)
+                } catch (e: NoSuchMethodError) {
+                    put("txLinkSpeed", null)
+                    put("rxLinkSpeed", null)
+                }
             }
-
+            
             // Channel width
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 put("channelWidth", getChannelWidth())
@@ -116,7 +125,7 @@ class SignalMonitor(private val context: Context) {
                 put("networkTechnology", getNetworkTechnology(networkType))
 
                 // Signal strength - works without internet
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val signalStrength = telephonyManager.signalStrength
                     if (signalStrength != null) {
                         putAll(extractSignalMetrics(signalStrength))
@@ -271,7 +280,7 @@ class SignalMonitor(private val context: Context) {
         }
     }
 
-    @androidx.annotation.RequiresApi(Build.VERSION_CODES.P)
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
     private fun extractSignalMetrics(signalStrength: SignalStrength): Map<String, Any?> {
         return buildMap {
             try {
@@ -303,6 +312,8 @@ class SignalMonitor(private val context: Context) {
                 }
             } catch (e: Exception) {
                 // Silently fail
+            } catch (e: Error) {  
+                // Silently fail
             }
         }
     }
@@ -333,6 +344,8 @@ class SignalMonitor(private val context: Context) {
                     }
                 }
             } catch (e: Exception) {
+                // Silently fail
+            } catch (e: Error) { 
                 // Silently fail
             }
         }
