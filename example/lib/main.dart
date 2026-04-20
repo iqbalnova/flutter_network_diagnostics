@@ -1,4 +1,9 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_network_diagnostics/flutter_network_diagnostics.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   runApp(const MyApp());
@@ -7,45 +12,20 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Network Diagnostics Demo',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const MyHomePage(title: 'Flutter Network Diagnostics'),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
 
   final String title;
 
@@ -54,68 +34,303 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+  final FlutterNetworkDiagnosticsService _diagnosticsService =
+      FlutterNetworkDiagnosticsService();
 
-  void _incrementCounter() {
+  StreamSubscription<MobileSignalInfo>? _mobileSignalSubscription;
+  MobileSignalInfo? _mobileSignalInfo;
+  bool _isMonitoring = false;
+  bool _isLoading = false;
+  String _statusMessage =
+      'Tekan "Request Permission" lalu "Start Monitoring" untuk mulai.';
+
+  @override
+  void dispose() {
+    _mobileSignalSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _requestPermissions() async {
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      setState(() {
+        _statusMessage =
+            'Demo permission ini hanya untuk Android/iOS. Platform sekarang: ${Platform.operatingSystem}.';
+      });
+      return;
+    }
+
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _isLoading = true;
+      _statusMessage = 'Meminta permission location dan phone...';
+    });
+
+    try {
+      final locationStatus = await Permission.location.request();
+      final phoneStatus = await Permission.phone.request();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (locationStatus.isGranted && phoneStatus.isGranted) {
+        setState(() {
+          _statusMessage =
+              'Permission granted ✅ Kamu bisa mulai monitoring signal mobile.';
+        });
+        return;
+      }
+
+      if (locationStatus.isPermanentlyDenied ||
+          phoneStatus.isPermanentlyDenied) {
+        setState(() {
+          _statusMessage =
+              'Permission ditolak permanen. Membuka pengaturan aplikasi...';
+        });
+        await openAppSettings();
+        return;
+      }
+
+      setState(() {
+        _statusMessage =
+            'Permission belum lengkap. Location: ${locationStatus.name}, Phone: ${phoneStatus.name}.';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _statusMessage = 'Gagal request permission: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<bool> _hasRequiredPermissions() async {
+    final locationStatus = await Permission.location.status;
+    final phoneStatus = await Permission.phone.status;
+    return locationStatus.isGranted && phoneStatus.isGranted;
+  }
+
+  Future<void> _startMobileMonitoring() async {
+    if (!Platform.isAndroid) {
+      setState(() {
+        _statusMessage =
+            'getMobileSignalStream saat ini hanya didukung di Android.';
+      });
+      return;
+    }
+
+    final hasPermissions = await _hasRequiredPermissions();
+    if (!hasPermissions) {
+      setState(() {
+        _statusMessage =
+            'Permission belum diberikan. Jalankan Request Permission dulu.';
+      });
+      return;
+    }
+
+    await _mobileSignalSubscription?.cancel();
+
+    _mobileSignalSubscription = _diagnosticsService
+        .getMobileSignalStream(intervalMs: 1500)
+        .listen(
+          (info) {
+            if (!mounted) {
+              return;
+            }
+            setState(() {
+              _mobileSignalInfo = info;
+              _isMonitoring = true;
+              _statusMessage =
+                  'Monitoring berjalan • Update terakhir: ${info.timestamp.toLocal()}';
+            });
+          },
+          onError: (Object error) {
+            if (!mounted) {
+              return;
+            }
+
+            setState(() {
+              _isMonitoring = false;
+              _statusMessage = 'Error stream mobile signal: $error';
+            });
+          },
+          onDone: () {
+            if (!mounted) {
+              return;
+            }
+
+            setState(() {
+              _isMonitoring = false;
+              _statusMessage = 'Monitoring selesai.';
+            });
+          },
+        );
+
+    setState(() {
+      _isMonitoring = true;
+      _statusMessage = 'Mulai subscribe stream mobile signal...';
+    });
+  }
+
+  Future<void> _stopMobileMonitoring() async {
+    await _mobileSignalSubscription?.cancel();
+    _mobileSignalSubscription = null;
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isMonitoring = false;
+      _statusMessage = 'Monitoring dihentikan.';
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    final info = _mobileSignalInfo;
+
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Mobile Signal Monitor',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(_statusMessage),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: _isLoading ? null : _requestPermissions,
+                        icon: const Icon(Icons.verified_user_outlined),
+                        label: const Text('Request Permission'),
+                      ),
+                      FilledButton.icon(
+                        onPressed: (_isLoading || _isMonitoring)
+                            ? null
+                            : _startMobileMonitoring,
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        label: const Text('Start Monitoring'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _isMonitoring ? _stopMobileMonitoring : null,
+                        icon: const Icon(Icons.stop_rounded),
+                        label: const Text('Stop'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Signal Snapshot',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  _InfoRow(
+                    label: 'Connected',
+                    value: '${info?.isConnected ?? false}',
+                  ),
+                  _InfoRow(label: 'Operator', value: info?.operatorName ?? '-'),
+                  _InfoRow(
+                    label: 'Generation',
+                    value: info?.networkGeneration.label ?? '-',
+                  ),
+                  _InfoRow(
+                    label: 'Technology',
+                    value: info?.networkTechnology.label ?? '-',
+                  ),
+                  _InfoRow(
+                    label: 'Signal Strength',
+                    value: info?.signalStrength != null
+                        ? '${info!.signalStrength} dBm'
+                        : '-',
+                  ),
+                  _InfoRow(
+                    label: 'Signal Quality',
+                    value: info?.signalQuality ?? '-',
+                  ),
+                  _InfoRow(
+                    label: 'Signal Level',
+                    value: info?.signalLevel != null
+                        ? '${info!.signalLevel}%'
+                        : '-',
+                  ),
+                  _InfoRow(
+                    label: 'RSRP',
+                    value: info?.rsrp != null ? '${info!.rsrp} dBm' : '-',
+                  ),
+                  _InfoRow(label: 'RSRQ', value: info?.rsrq?.toString() ?? '-'),
+                  _InfoRow(label: 'SINR', value: info?.sinr?.toString() ?? '-'),
+                  _InfoRow(label: 'Cell ID', value: info?.cellId ?? '-'),
+                  _InfoRow(
+                    label: 'Roaming',
+                    value: '${info?.isRoaming ?? false}',
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+          ),
+        ],
       ),
     );
   }
