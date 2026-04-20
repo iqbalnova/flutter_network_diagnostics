@@ -54,8 +54,11 @@ class SignalMonitor(private val context: Context) {
             // API 29+: Max link speed
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 try {
-                    put("maxLinkSpeed", wifiInfo.maxSupportedTxLinkSpeedMbps)
-                } catch (e: NoSuchMethodError) {
+                    val method = wifiInfo.javaClass.getMethod("getMaxSupportedTxLinkSpeedMbps")
+                    put("maxLinkSpeed", method.invoke(wifiInfo) as? Int)
+                } catch (e: Exception) {
+                    put("maxLinkSpeed", null)
+                } catch (e: Error) {
                     put("maxLinkSpeed", null)
                 }
             }
@@ -63,9 +66,14 @@ class SignalMonitor(private val context: Context) {
             // API 31+: TX/RX speeds
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 try {
-                    put("txLinkSpeed", wifiInfo.txLinkSpeedMbps)
-                    put("rxLinkSpeed", wifiInfo.rxLinkSpeedMbps)
-                } catch (e: NoSuchMethodError) {
+                    val txMethod = wifiInfo.javaClass.getMethod("getTxLinkSpeedMbps")
+                    val rxMethod = wifiInfo.javaClass.getMethod("getRxLinkSpeedMbps")
+                    put("txLinkSpeed", txMethod.invoke(wifiInfo) as? Int)
+                    put("rxLinkSpeed", rxMethod.invoke(wifiInfo) as? Int)
+                } catch (e: Exception) {
+                    put("txLinkSpeed", null)
+                    put("rxLinkSpeed", null)
+                } catch (e: Error) {
                     put("txLinkSpeed", null)
                     put("rxLinkSpeed", null)
                 }
