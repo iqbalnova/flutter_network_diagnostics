@@ -1,4 +1,4 @@
-#import "DNSResolver.h"
+#import "include/DNSResolver.h"
 #import <resolv.h>
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -58,37 +58,3 @@
 }
 
 @end
-
-// // Method 3: Mengambil semua DNS (IPv4)
-// #import "DNSResolver.h"
-// #import <resolv.h>
-// #import <arpa/inet.h>
-
-// @implementation DNSResolver
-
-// + (NSArray<NSString *> *)getDNSServers {
-//     NSMutableArray<NSString *> *dnsServers = [NSMutableArray array];
-    
-//     res_state res = malloc(sizeof(struct __res_state));
-//     if (res_ninit(res) == 0) {
-//         for (int i = 0; i < res->nscount; i++) {
-//             struct sockaddr_in addr = res->nsaddr_list[i];
-            
-//             if (addr.sin_family == AF_INET) {
-//                 char buffer[INET_ADDRSTRLEN];
-//                 if (inet_ntop(AF_INET, &addr.sin_addr, buffer, INET_ADDRSTRLEN) != NULL) {
-//                     NSString *ipString = [NSString stringWithUTF8String:buffer];
-//                     if (ipString.length > 0 && ![ipString isEqualToString:@"0.0.0.0"]) {
-//                         [dnsServers addObject:ipString];
-//                     }
-//                 }
-//             }
-//         }
-//         res_nclose(res);
-//     }
-//     free(res);
-    
-//     return [dnsServers copy];
-// }
-
-// @end

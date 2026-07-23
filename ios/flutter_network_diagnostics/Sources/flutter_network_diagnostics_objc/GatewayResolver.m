@@ -1,5 +1,5 @@
 // GatewayResolver.m
-#import "GatewayResolver.h"
+#import "include/GatewayResolver.h"
 #import <sys/sysctl.h>
 #import <sys/socket.h>
 #import <arpa/inet.h>

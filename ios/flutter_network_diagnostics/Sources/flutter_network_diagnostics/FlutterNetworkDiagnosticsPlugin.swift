@@ -6,6 +6,10 @@ import NetworkExtension
 import CoreLocation
 import Foundation
 
+#if SWIFT_PACKAGE
+import flutter_network_diagnostics_objc
+#endif
+
 public class FlutterNetworkDiagnosticsPlugin: NSObject, FlutterPlugin, FlutterStreamHandler, CLLocationManagerDelegate {
     
     private var locationManager: CLLocationManager?

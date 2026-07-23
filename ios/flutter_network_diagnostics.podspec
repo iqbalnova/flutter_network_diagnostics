@@ -9,8 +9,11 @@ Network diagnostics plugin for Flutter applications.
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Your Company' => 'email@example.com' }
   s.source           = { :path => '.' }
-  s.source_files     = 'Classes/**/*'
-  s.public_header_files = 'Classes/**/*.h'
+  s.source_files     = 'flutter_network_diagnostics/Sources/**/*'
+  s.public_header_files = 'flutter_network_diagnostics/Sources/flutter_network_diagnostics_objc/include/**/*.h'
+  s.resource_bundles = {
+    'flutter_network_diagnostics_privacy' => ['flutter_network_diagnostics/Sources/flutter_network_diagnostics/PrivacyInfo.xcprivacy']
+  }
   s.dependency 'Flutter'
   s.platform = :ios, '13.0'
 
